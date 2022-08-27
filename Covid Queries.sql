@@ -28,7 +28,7 @@ WHERE continent IS NOT NULL
 GROUP BY location
 ORDER BY 3 desc
 
---Countries with Highest Mortality (North Korea is an Outlier—6 deaths reported, but only 1 case reported)
+--Countries with Highest Mortality (North Korea is an Outlierâ€”6 deaths reported, but only 1 case reported)
 SELECT location, MAX(total_deaths) AS total_deaths, MAX(total_cases) AS total_cases, MAX(total_deaths)/MAX(total_cases) AS chance_of_death
 FROM [covid deaths]
 WHERE continent IS NOT NULL
@@ -124,20 +124,58 @@ JOIN [covid vaccinations] vac
 	and death.date = vac.date 
 WHERE death.continent IS NOT NULL 
 
-SELECT *, (Running_Total_Vac/Population)*100 AS Percent_Vac
+SELECT *, (Running_Total_Vac/Population)*100 AS Percent_Vac --There is a point where the number of vaccinations exceeds the population in the U.S. indicated that repeat vaccinations are likely included
 FROM #PoptoVac
 
---Creating View for later Viz
+--Find the difference in new cases from the day before
+SELECT location, date, new_cases, (new_cases - LAG(new_cases) OVER (PARTITION BY location ORDER BY date)) AS difference_daily_cases 
+FROM [covid deaths]
+WHERE continent IS NOT NULL
+ORDER BY 1, 2
 
-CREATE VIEW PoptoVac AS
-SELECT death.location, death.date, death.population, new_vaccinations, 
-	SUM(new_vaccinations) OVER (Partition by death.location ORDER BY death.location, death.date) AS running_total_vac
-FROM [covid deaths] death
+--Creating a Temporary Table of the above
+DROP TABLE IF EXISTS #PercentChangeCases
+CREATE TABLE #PercentChangeCases
+(location nvarchar(255),
+date datetime,
+new_cases numeric,
+previous_cases numeric,
+difference_daily_cases numeric,
+percent_change numeric
+)
+INSERT INTO #PercentChangeCases
+SELECT
+location, 
+date, 
+new_cases, 
+LAG(new_cases) OVER (PARTITION BY location ORDER BY date) AS previous_cases, 
+(new_cases - LAG(new_cases) OVER (PARTITION BY location ORDER BY date)) AS difference_daily_cases,
+100* (new_cases - LAG(new_cases) OVER (PARTITION BY location ORDER BY date))/(NULLIF(LAG(new_cases) OVER (PARTITION BY location ORDER BY date),0)) AS percent_change
+FROM [covid deaths]
+WHERE continent IS NOT NULL
+
+--Joining Percent Change Info on Vaccination Info
+SELECT *
+FROM #PercentChangeCases
+JOIN [covid vaccinations] vac
+	ON #PercentChangeCases.date = vac.date and #PercentChangeCases.location = vac.location
+WHERE vac.location = 'United States'
+
+
+--Creating Views for later Viz
+
+--Create view to compare number of daily cases and deaths to percent vaccinated
+DROP VIEW IF EXISTS DeathVacPercent
+CREATE VIEW DeathVacPercent AS
+SELECT death.location, 
+death.date, 
+death.population, 
+new_cases,
+new_deaths,
+people_vaccinated, 
+(people_vaccinated/death.population)*100 AS percent_vaccinated
+FROM [covid deaths]death
 JOIN [covid vaccinations] vac
 	ON death.location = vac.location
-	and death.date = vac.date 
-WHERE death.continent IS NOT NULL 
-
-SELECT *
-FROM PoptoVac
-
+	and death.date = vac.date
+WHERE death.continent IS NOT NULL

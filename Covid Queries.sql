@@ -133,7 +133,7 @@ FROM [covid deaths]
 WHERE continent IS NOT NULL
 ORDER BY 1, 2
 
---Creating a Temporary Table of the above
+--Creating a Temporary Table of the above with Percent Change from Day to Day
 DROP TABLE IF EXISTS #PercentChangeCases
 CREATE TABLE #PercentChangeCases
 (location nvarchar(255),
@@ -164,14 +164,34 @@ WHERE vac.location = 'United States'
 
 --Creating Views for later Viz
 
+
+
+CREATE VIEW PoptoVac AS
+SELECT death.location, death.date, death.population, new_vaccinations, 
+	SUM(new_vaccinations) OVER (Partition by death.location ORDER BY death.location, death.date) AS running_total_vac
+FROM [covid deaths] death
+JOIN [covid vaccinations] vac
+	ON death.location = vac.location
+	and death.date = vac.date 
+WHERE death.continent IS NOT NULL 
+
+SELECT *
+FROM PoptoVac
+
+
+
 --Create view to compare number of daily cases and deaths to percent vaccinated
 DROP VIEW IF EXISTS DeathVacPercent
 CREATE VIEW DeathVacPercent AS
-SELECT death.location, 
+SELECT 
+death.iso_code,
+death.location, 
 death.date, 
 death.population, 
 new_cases,
 new_deaths,
+total_cases,
+total_deaths,
 people_vaccinated, 
 (people_vaccinated/death.population)*100 AS percent_vaccinated
 FROM [covid deaths]death
@@ -179,3 +199,42 @@ JOIN [covid vaccinations] vac
 	ON death.location = vac.location
 	and death.date = vac.date
 WHERE death.continent IS NOT NULL
+
+--Create View to get deaths by continent
+DROP VIEW IF EXISTS GlobalInfo
+CREATE VIEW GlobalInfo AS
+SELECT 
+iso_code,
+location,
+date,
+total_cases,
+new_cases,
+total_deaths,
+new_deaths
+FROM [covid deaths]
+WHERE continent IS NULL
+
+
+
+--Looking for oddities based on visualization
+SELECT iso_code,location, date, people_vaccinated, people_fully_vaccinated
+FROM [covid vaccinations]
+WHERE location = 'Greenland'
+order by  3 desc  --There are some NULLs in the most recent data for people_vaccinated
+
+--Looking for oddities based on visualization
+SELECT location,  MAX((people_vaccinated/population)*100) AS percent_vaccinated
+FROM [covid vaccinations]
+WHERE (people_vaccinated/population)*100 > 100
+GROUP BY location
+--Gibraltar, Samoa, United Arab Emirates, Qatar, and Brunei have percents greater than 100
+--This may be due to visitor vaccinations, error in record keeping, or other unidentified factors
+
+--Looking for oddities based on visualization
+SELECT location,  MAX((people_fully_vaccinated/population)*100) AS percent_fully_vaccinated
+FROM [covid vaccinations]
+WHERE (people_fully_vaccinated/population)*100 > 100
+GROUP BY location
+--Gibraltar, United Arab Emirates, and  Qatar still have percents greater than 100 for full vaccinations
+--Again, his may be due to visitor vaccinations, error in record keeping, or other unidentified factors
+
